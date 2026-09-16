@@ -39,6 +39,6 @@ jobs:
       with:
         files: my-app-windows.zip
         name: Release ${{ github.ref_name }}
-        tag_name: ${{ github.ref }}
+        tag_name: ${{ github.ref_name }}
         draft: false
         prerelease: false
