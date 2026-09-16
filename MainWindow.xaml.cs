@@ -3,6 +3,7 @@ using OpenCvSharp;
 using OpenCvSharp.WpfExtensions;
 using System.Drawing;
 using System.IO;
+using System.Media;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
@@ -13,7 +14,6 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Navigation;
 using System.Windows.Shapes;
-
 namespace FocusApp
 {
     /// <summary>
@@ -25,14 +25,42 @@ namespace FocusApp
         private CancellationTokenSource cancelTokenSource;
         private FrontalFaceDetector faceDetector;
         private ShapePredictor shapePredictor;
-        private float cofindenceNeeded = .75f;
-        float nmsThreshold = 0.3f;
-        int topK = 5000;
+        private SoundPlayer player;
+
+        private float minAudioDuration = 2;
+        private float maxdangerTime = 30;
+        private bool areUsing = false;
+
+        private DateTime curDangerTime = DateTime.UtcNow;
+        private DateTime curAudioDuration = DateTime.UtcNow;
+
+        private bool isPlaying = false;
         public MainWindow()
         {
             InitializeComponent();
         }
 
+        private void ResetDangerTime()
+        {
+            curDangerTime = DateTime.UtcNow;
+        }
+
+        private float GetDangerTimeSpent()
+        {
+            TimeSpan duration = DateTime.UtcNow - curDangerTime;
+            return duration.Seconds;
+        }
+
+        private void ResetAudioTime()
+        {
+            curAudioDuration = DateTime.UtcNow;
+        }
+
+        private float GetTimeListenToAudio()
+        {
+            TimeSpan duration = DateTime.UtcNow - curAudioDuration;
+            return duration.Seconds;
+        }
         private void WindowLoaded(object sender, RoutedEventArgs e)
         {
             capture = new VideoCapture(0);
@@ -48,10 +76,14 @@ namespace FocusApp
 
         }
 
+
+        //This is the main loop
         private async Task CaptureFrames(CancellationToken cancelToken)
         {
             string basePath = AppDomain.CurrentDomain.BaseDirectory;
             string modelPath = System.IO.Path.Combine(basePath, ".\\DetectionTypes\\shape_predictor_68_face_landmarks.dat");
+
+            player = new SoundPlayer(System.IO.Path.Combine(basePath, ".\\AudioFiles\\Alarm.wav"));
             int frameWidth = (int)capture.Get(VideoCaptureProperties.FrameWidth);
             int frameHeight = (int)capture.Get(VideoCaptureProperties.FrameHeight);
             int prevUpdateFrame = 10;
@@ -83,8 +115,8 @@ namespace FocusApp
 
                     prevLeftPupil = leftPupil;
                     prevRightPupil = rightPupil;
-                    //Modify image here 
-
+                    leftEyePoints.Clear();
+                    rightEyePoints.Clear();
                     //Grayscale the image
                     Cv2.CvtColor(frame, grayFrame, ColorConversionCodes.BGR2GRAY);
 
@@ -109,13 +141,41 @@ namespace FocusApp
                     Cv2.Circle(frame, leftPupil, 1, Scalar.Red, thickness: -1);
                     Cv2.Circle(frame, rightPupil, 1, Scalar.Red, thickness: -1);
                     float distance = GetDistance(leftEyePoints, rightEyePoints);
+
                     bool eyeMoving = IsEyeMoving(prevLeftPupil, leftPupil, distance) && IsEyeMoving(prevRightPupil, rightPupil, distance);
                     bool eyesClosed = IsEyeClosed(leftEyePoints, distance) && IsEyeClosed(rightEyePoints, distance);
-                    string movingText = eyeMoving ? "Moving your eyes" : "You distracted";
+                    bool canStartAlarm = (eyeMoving == false || eyesClosed) && areUsing;
+                    if(canStartAlarm == false)
+                    {
+                        ResetDangerTime();
+                    }
+
+                    if(areUsing == false && isPlaying)
+                    {
+                        player.Stop();
+                        isPlaying = false;
+                    }
+
+                    if (isPlaying == false && canStartAlarm && maxdangerTime < GetDangerTimeSpent())
+                    {
+                        player.Play();
+                        isPlaying = true;
+                        ResetAudioTime();
+                    } else if(isPlaying && canStartAlarm == false && GetTimeListenToAudio() > minAudioDuration)
+                    {
+                        player.Stop();
+                        isPlaying = false;
+                        ResetDangerTime();
+
+                    }
+
+                    string movingText = eyeMoving ? "Moving your eyes" : "You're distracted";
                     string closedText = !eyesClosed ? "Your eyes are open" : "You're falling asleep";
-                    Cv2.PutText(frame, $"Distance: {distance}", new OpenCvSharp.Point(0, 100), HersheyFonts.HersheyPlain, 1, Scalar.Black);
-                    Cv2.PutText(frame, movingText, new OpenCvSharp.Point(0, 200), HersheyFonts.HersheyPlain, 1, Scalar.Black);
-                    Cv2.PutText(frame, closedText, new OpenCvSharp.Point(0, 300), HersheyFonts.HersheyPlain, 1, Scalar.Black);
+                    string usingText = areUsing ? "Activated" : "Inactive";
+                    Cv2.PutText(frame, usingText, new OpenCvSharp.Point(0, 100), HersheyFonts.HersheyPlain, 1, Scalar.Black);
+                    Cv2.PutText(frame, $"Distance: {distance}", new OpenCvSharp.Point(0, 200), HersheyFonts.HersheyPlain, 1, Scalar.Black);
+                    Cv2.PutText(frame, movingText, new OpenCvSharp.Point(0, 300), HersheyFonts.HersheyPlain, 1, Scalar.Black);
+                    Cv2.PutText(frame, closedText, new OpenCvSharp.Point(0, 400), HersheyFonts.HersheyPlain, 1, Scalar.Black);
 
                     //Locked in after here
                     var bitmapSource = BitmapSourceConverter.ToBitmapSource(frame);
@@ -225,7 +285,7 @@ namespace FocusApp
         {
             if (eyePoints.Count == 0)
             {
-                return false;
+                return true;
             }
             int minDistance = (int)(48 / screenDistance);
             int distance = Math.Abs((eyePoints[1].Y + eyePoints[2].Y) / 2 - (eyePoints[4].Y + eyePoints[5].Y) / 2);
@@ -259,8 +319,24 @@ namespace FocusApp
         private void WindowClosing(object sender, System.ComponentModel.CancelEventArgs e)
         {
 
+            if(isPlaying)
+            {
+                player.Stop();
+            }
             cancelTokenSource?.Cancel();
             capture?.Dispose();
+        }
+
+        private void ChnageUseState(object sender, RoutedEventArgs e)
+        {
+            if(areUsing)
+            {
+                areUsing = false;
+            }
+            else
+            {
+                areUsing = true;
+            }
         }
     }
 }

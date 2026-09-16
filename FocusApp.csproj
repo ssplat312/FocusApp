@@ -9,11 +9,15 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <None Remove="AudioFiles\Alarm.wav" />
     <None Remove="DetectionTypes\face_detection_yunet_2026may.onnx" />
     <None Remove="DetectionTypes\shape_predictor_68_face_landmarks.dat" />
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="AudioFiles\Alarm.wav">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
     <Content Include="DetectionTypes\face_detection_yunet_2026may.onnx">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
