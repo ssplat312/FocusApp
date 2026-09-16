@@ -1,0 +1,37 @@
+name: Build and Publish .NET App
+
+on:
+  push:
+    branches: [ "main" ] # Triggers the workflow on pushes to the main branch
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Setup .NET SDK
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '9.0' # Change this to match your target .NET version
+
+    - name: Restore Dependencies
+      run: dotnet restore
+
+    - name: Build Application
+      run: dotnet build --configuration Release --no-restore
+
+    - name: Run Tests
+      run: dotnet test --no-build --verbosity normal
+
+    - name: Publish Binaries
+      run: dotnet publish -c Release -o ./publish
+
+    # Optional: Uploads the compiled folder as a downloadable artifact in GitHub
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: dotnet-published-app
+        path: ./publish
